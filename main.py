@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
+import concurrent.futures
 
 
 api_key = st.secrets["API_KEY"]
@@ -20,6 +21,7 @@ def get_response(prompt):
     return result
 
 def send_for_moderations(message):
+    print("start moderation")
     url = "https://api.hyperleap.ai/moderations"
     payload = json.dumps({"input": message})
     headers = {
@@ -27,10 +29,12 @@ def send_for_moderations(message):
         "content-type": "application/json"
     }
     response = requests.post(url, data=payload, headers=headers)
+    print("end moderation")
     result = response.json()
     return result
 
 def detect_topic(message):
+    print("start topic")
     url = "https://api.hyperleap.ai/prompts"
     payload = {
     "promptId": "2f654e34-637f-466c-96ab-ed0722a39ccb",
@@ -53,6 +57,7 @@ def detect_topic(message):
     return result
 
 def detect_toxicity(message):
+    print("start toxic")
     url = "https://api.hyperleap.ai/prompts"
     payload = {
         "promptId": "fc4ef70d-2889-4357-831f-f7e9f5f19849",
@@ -73,55 +78,77 @@ def detect_toxicity(message):
     result = result['choices'][0]['message']['content']
     return result
 
+def detect_keywords(message):
+    print("start keyword")
+    url = "https://api.hyperleap.ai/prompts"
+    payload = {
+    "promptId": "47eca14e-c1bb-4754-8b36-90732eb3bc00",
+    "replacements": {
+        "keywords": keyword_value,
+        "input": message
+        }
+    }
+    headers = {
+        "accept": "application/json",
+        "x-hl-api-key":api_key,
+        "content-type": "application/json"
+    }
+    
+    response = requests.post(url, json=payload, headers=headers)
+    
+    result = response.json()
+    print("result of keywords ",result)
+    result = result['choices'][0]['message']['content']
+    return result
+
 
 def process_response(response):
     errors = []
-    if topics_checkbox:
-        print('topic check')
-        topic_detection = detect_topic(prompt)
-        if topic_detection.lower()=="true":
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {}
+        
+        if topics_checkbox:
+            futures['topics'] = executor.submit(detect_topic, prompt)
+        
+        if st.session_state['checkbox_states']['Toxicity']:
+            futures['toxicity'] = executor.submit(detect_toxicity, prompt)
+        
+        if keyword_checkbox:
+            futures['keywords'] = executor.submit(detect_keywords, prompt)
+
+        if any(st.session_state['checkbox_states'].values()):
+            futures['moderation'] = executor.submit(send_for_moderations, response)
+        
+        results = {key: future.result() for key, future in futures.items()}
+        
+        if 'topics' in results and results['topics'].lower() == "true":
             errors.append("derogatory topics")
-        print(topic_detection)
-    
-    if st.session_state['checkbox_states']['Toxicity']:
-        print('toxicity check')
-        toxicity_detection = detect_toxicity(prompt)
-        if toxicity_detection.lower()=="true":
+        
+        if 'toxicity' in results and results['toxicity'].lower() == "true":
             errors.append("toxicity")
-        print(toxicity_detection)
-
-    if keyword_checkbox:
-        print('keyword check')
-        keywords = keyword_value.split(",")
-        flag = False
-        for keyword in keywords:
-            if keyword.lower() in response.lower():
-                flag = True
-                break
-        if flag : 
+        
+        if 'keywords' in results and results['keywords'].lower() == "true":
             errors.append("derogatory keywords")
-
-    if any(st.session_state['checkbox_states'].values()) :
-        print("moderation")
-        result = send_for_moderations(response)
-        flagged_categories = [
-            category.lower() for category, is_flagged in result["results"][0]["categories"].items() if is_flagged
-        ]
-        normalized_flagged_categories = set()
-        for category in flagged_categories:
-            if "hate" in category:
-                normalized_flagged_categories.add("hate")
-            elif "harassment" in category:
-                normalized_flagged_categories.add("harassment")
-            else:
-                normalized_flagged_categories.add(category)
-        selected_categories = [
-            category.lower() for category, selected in st.session_state['checkbox_states'].items() if selected
-        ]
-        matching_categories = list(set(normalized_flagged_categories) & set(selected_categories))
-        print(normalized_flagged_categories)
-        errors = errors + matching_categories
-
+        
+        if 'moderation' in results:
+            result = results['moderation']
+            flagged_categories = [
+                category.lower() for category, is_flagged in result["results"][0]["categories"].items() if is_flagged
+            ]
+            normalized_flagged_categories = set()
+            for category in flagged_categories:
+                if "hate" in category:
+                    normalized_flagged_categories.add("hate")
+                elif "harassment" in category:
+                    normalized_flagged_categories.add("harassment")
+                else:
+                    normalized_flagged_categories.add(category)
+            selected_categories = [
+                category.lower() for category, selected in st.session_state['checkbox_states'].items() if selected
+            ]
+            matching_categories = list(set(normalized_flagged_categories) & set(selected_categories))
+            print(normalized_flagged_categories)
+            errors += matching_categories
     if errors:
         return True, errors
     return False, get_response(response)
