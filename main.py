@@ -142,10 +142,6 @@ def checkbox_changed(option):
 
 # Sidebar with checkboxes
 with st.sidebar:
-    st.session_state['LLM'] = st.selectbox(
-        "Select LLM Model",
-        ("OpenAI", "AzureAI", "Anthropic", "Google")
-    )
     st.sidebar.title("Apply Guardrails")
     for option in st.session_state['checkbox_states']:
         st.sidebar.checkbox(
