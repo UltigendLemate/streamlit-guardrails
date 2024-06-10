@@ -2,11 +2,9 @@ import streamlit as st
 import requests
 import json
 import os
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
-api_key = os.getenv('API_KEY')
+
+api_key = st.secrets["API_KEY"]
 
 # Define functions to interact with the APIs
 def get_response(prompt):
