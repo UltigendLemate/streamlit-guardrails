@@ -56,6 +56,28 @@ def detect_topic(message):
     result = result['choices'][0]['message']['content']
     return result
 
+def detect_sensitive_info(message):
+    print("start sensitive info")
+    url = "https://api.hyperleap.ai/prompts"
+    payload = {
+        "promptId": "7130b7c5-3fed-4c4c-ba80-5e6d1c53cc5b",
+        "replacements": {
+            "input": message
+        }
+    }
+    headers = {
+        "accept": "application/json",
+        "x-hl-api-key": api_key,
+        "content-type": "application/json"
+    }
+    
+    response = requests.post(url, json=payload, headers=headers)
+    
+    result = response.json()
+    print("result of sensitive",result)
+    result = result['choices'][0]['message']['content']
+    return result
+
 def detect_toxicity(message):
     print("start toxic")
     url = "https://api.hyperleap.ai/prompts"
@@ -110,8 +132,11 @@ def process_response(response):
         if topics_checkbox:
             futures['topics'] = executor.submit(detect_topic, prompt)
         
-        if st.session_state['checkbox_states']['Toxicity']:
+        if toxicity_checkbox:
             futures['toxicity'] = executor.submit(detect_toxicity, prompt)
+
+        if sensitivity_checkbox:
+            futures['sensitivity'] = executor.submit(detect_sensitive_info, prompt)
         
         if keyword_checkbox:
             futures['keywords'] = executor.submit(detect_keywords, prompt)
@@ -126,6 +151,9 @@ def process_response(response):
         
         if 'toxicity' in results and results['toxicity'].lower() == "true":
             errors.append("toxicity")
+
+        if 'sensitivity' in results and results['sensitivity'].lower() == "true":
+            errors.append("sensitive information")
         
         if 'keywords' in results and results['keywords'].lower() == "true":
             errors.append("derogatory keywords")
@@ -161,7 +189,6 @@ if 'checkbox_states' not in st.session_state:
         "Self-Harm": False,
         "Sexual": False,
         "Violence": False,
-        "Toxicity" : False,
     }
 
 def checkbox_changed(option):
@@ -177,6 +204,7 @@ with st.sidebar:
             on_change=checkbox_changed,
             args=(option,)
         )
+    toxicity_checkbox = st.sidebar.checkbox("Toxicity")
     topics_checkbox = st.sidebar.checkbox("Topics")
     if topics_checkbox:
         topics_value = st.text_input("Type Topics")
@@ -188,6 +216,7 @@ with st.sidebar:
         keyword_value = st.text_input("Type keywords seperated by commad")
     else:
         keyword_value = ""
+    sensitivity_checkbox = st.sidebar.checkbox("Sensitive Information")
 
 # Chatbot UI
 st.title("Hyperleap Guardrails Chatbot")
@@ -195,17 +224,29 @@ st.title("Hyperleap Guardrails Chatbot")
 I am a guardrails bot that detect and prevent harmful content.
 """
 
-if prompt := st.chat_input():
-    if 'messages' not in st.session_state:
-        st.session_state['messages'] = []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    st.session_state['messages'].append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if prompt := st.chat_input():
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    # st.session_state['messages'].append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
     
     error, response = process_response(prompt)
     if error:
-        st.error(f'Potential {", ".join(response)} detected. Please rephrase your message.', icon="🚨")
+        error_message = f'Potential {", ".join(response)} detected. Please rephrase your message.'
+        st.session_state.messages.append({"role": "assistant", "content": f':red-background[{error_message}]'})
+        # st.error(error_message, icon="🚨")
+        with st.chat_message("assistant"):
+            st.markdown(f':red-background[{error_message}]')
     else:
         msg = response['choices'][0]['message']
-        st.session_state['messages'].append(msg)
-        st.chat_message("assistant").write(msg['content'])
+        st.session_state.messages.append({"role": "assistant", "content": msg['content']})
+        # st.chat_message("assistant").write(msg['content'])
+        with st.chat_message("assistant"):
+            st.markdown(msg['content'])
